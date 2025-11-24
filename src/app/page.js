@@ -1,14 +1,7 @@
 "use client";
 import { useState, useEffect } from 'react';
 
-// Importación dinámica de TensorFlow.js para mejor compatibilidad
-let tf;
-if (typeof window !== 'undefined') {
-  import('@tensorflow/tfjs').then((module) => {
-    tf = module;
-  });
-}
-
+// Componente principal
 export default function Calculadora() {
   const [modeloActual, setModeloActual] = useState(null);
   const [operacion, setOperacion] = useState('suma');
@@ -16,93 +9,71 @@ export default function Calculadora() {
   const [valB, setValB] = useState('');
   const [resultado, setResultado] = useState(null);
   const [cargando, setCargando] = useState(false);
-  const [estadoModelo, setEstadoModelo] = useState('Iniciando...');
-  const [tfReady, setTfReady] = useState(false);
+  const [estado, setEstado] = useState('Cargando...');
+  const [tf, setTf] = useState(null);
 
-  // Cargar TensorFlow.js
+  // Cargar TensorFlow.js dinámicamente
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      import('@tensorflow/tfjs').then((module) => {
-        tf = module;
-        setTfReady(true);
-        setEstadoModelo('TensorFlow.js listo ✅');
-      }).catch(error => {
+    const cargarTF = async () => {
+      try {
+        setEstado('Cargando TensorFlow.js...');
+        const tfModule = await import('@tensorflow/tfjs');
+        setTf(tfModule);
+        setEstado('TensorFlow.js listo ✅');
+      } catch (error) {
         console.error('Error cargando TensorFlow.js:', error);
-        setEstadoModelo('Error cargando TensorFlow.js ❌');
-      });
-    }
+        setEstado('Error cargando TensorFlow.js ❌');
+      }
+    };
+
+    cargarTF();
   }, []);
 
   // Cargar modelo cuando cambia la operación
   useEffect(() => {
-    if (!tfReady || !tf) return;
+    if (!tf) return;
 
     let isMounted = true;
 
-    async function cargarModelo() {
+    const cargarModelo = async () => {
       if (!isMounted) return;
-      
+
       setModeloActual(null);
       setResultado(null);
-      setEstadoModelo(`Cargando modelo de ${operacion}...`);
+      setEstado(`Cargando modelo de ${operacion}...`);
       setCargando(true);
 
       try {
-        const path = operacion === 'suma' 
+        const rutaModelo = operacion === 'suma' 
           ? '/modelo_suma/model.json' 
           : '/modelo_resta/model.json';
         
-        console.log(`Cargando modelo desde: ${path}`);
-        const modelo = await tf.loadLayersModel(path);
+        console.log(`Cargando: ${rutaModelo}`);
+        const modelo = await tf.loadLayersModel(rutaModelo);
         
         if (isMounted) {
           setModeloActual(modelo);
-          setEstadoModelo(`✅ Modelo de ${operacion} cargado`);
+          setEstado(`Modelo de ${operacion} cargado ✅`);
+          console.log('Modelo cargado exitosamente');
         }
-      } catch (err) {
-        console.error('Error cargando modelo:', err);
+      } catch (error) {
+        console.error('Error cargando modelo:', error);
         if (isMounted) {
-          setEstadoModelo('❌ Error cargando modelo');
-          // Fallback: crear modelo simple
-          crearModeloFallback();
+          setEstado('Error cargando modelo ❌');
         }
       } finally {
         if (isMounted) {
           setCargando(false);
         }
       }
-    }
-
-    async function crearModeloFallback() {
-      try {
-        const model = tf.sequential();
-        model.add(tf.layers.dense({
-          units: 1,
-          inputShape: [2],
-          kernelInitializer: 'ones',
-          biasInitializer: 'zeros',
-        }));
-
-        model.compile({
-          optimizer: tf.train.adam(0.1),
-          loss: 'meanSquaredError'
-        });
-
-        if (isMounted) {
-          setModeloActual(model);
-          setEstadoModelo('⚠️ Usando modelo simple');
-        }
-      } catch (error) {
-        console.error('Error en fallback:', error);
-      }
-    }
+    };
 
     cargarModelo();
 
     return () => {
       isMounted = false;
     };
-  }, [operacion, tfReady]);
+  }, [operacion, tf]);
 
   const calcular = async () => {
     if (!modeloActual || !valA || !valB || !tf) return;
@@ -117,32 +88,36 @@ export default function Calculadora() {
         return;
       }
 
-      const inputTensor = tf.tensor2d([[numA, numB]]);
-      const prediccionTensor = modeloActual.predict(inputTensor);
-      const valores = await prediccionTensor.data();
+      // Crear tensor y predecir
+      const entrada = tf.tensor2d([[numA, numB]]);
+      const prediccion = modeloActual.predict(entrada);
+      const [resultadoPrediccion] = await prediccion.data();
       
-      setResultado(valores[0]);
+      setResultado(resultadoPrediccion);
       
       // Limpiar memoria
-      inputTensor.dispose();
-      prediccionTensor.dispose();
+      entrada.dispose();
+      prediccion.dispose();
 
     } catch (error) {
       console.error('Error en cálculo:', error);
-      // Cálculo manual como fallback
-      const resultadoManual = operacion === 'suma' 
+      // Fallback a cálculo manual
+      const calculoManual = operacion === 'suma' 
         ? parseFloat(valA) + parseFloat(valB)
         : parseFloat(valA) - parseFloat(valB);
-      setResultado(resultadoManual);
+      setResultado(calculoManual);
     } finally {
       setCargando(false);
     }
   };
 
-  const manejarKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      calcular();
-    }
+  const manejarEnter = (e) => {
+    if (e.key === 'Enter') calcular();
+  };
+
+  const probarEjemplo = (a, b) => {
+    setValA(a.toString());
+    setValB(b.toString());
   };
 
   return (
@@ -153,19 +128,15 @@ export default function Calculadora() {
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent mb-2">
             Calculadora Neuronal
           </h1>
-          <p className="text-gray-400 text-sm">
-            Sumas y restas potenciadas por IA
-          </p>
+          <p className="text-gray-400 text-sm">IA para sumas y restas</p>
         </div>
 
-        {/* Selector de Operación */}
-        <div className="flex space-x-4 mb-6">
+        {/* Selector de operación */}
+        <div className="flex gap-4 mb-6">
           <button
             onClick={() => setOperacion('suma')}
             className={`flex-1 py-3 px-4 rounded-xl font-semibold transition-all ${
-              operacion === 'suma' 
-                ? 'bg-blue-600 text-white shadow-lg' 
-                : 'bg-gray-700 text-gray-300'
+              operacion === 'suma' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-700 text-gray-300'
             }`}
           >
             ➕ Suma
@@ -173,9 +144,7 @@ export default function Calculadora() {
           <button
             onClick={() => setOperacion('resta')}
             className={`flex-1 py-3 px-4 rounded-xl font-semibold transition-all ${
-              operacion === 'resta' 
-                ? 'bg-red-600 text-white shadow-lg' 
-                : 'bg-gray-700 text-gray-300'
+              operacion === 'resta' ? 'bg-red-600 text-white shadow-lg' : 'bg-gray-700 text-gray-300'
             }`}
           >
             ➖ Resta
@@ -184,13 +153,28 @@ export default function Calculadora() {
 
         {/* Estado */}
         <div className={`text-center mb-4 text-sm px-4 py-2 rounded-full ${
-          estadoModelo.includes('✅') 
-            ? 'bg-green-900 text-green-300' 
-            : estadoModelo.includes('❌')
-            ? 'bg-red-900 text-red-300'
-            : 'bg-blue-900 text-blue-300'
+          estado.includes('✅') ? 'bg-green-900 text-green-300' : 
+          estado.includes('❌') ? 'bg-red-900 text-red-300' : 
+          'bg-blue-900 text-blue-300'
         }`}>
-          {estadoModelo}
+          {estado}
+        </div>
+
+        {/* Ejemplos rápidos */}
+        <div className="mb-6">
+          <p className="text-gray-400 text-sm mb-2 text-center">Probar con:</p>
+          <div className="grid grid-cols-2 gap-2">
+            {[[10, 5], [25, 15], [8, 3], [100, 50]].map(([a, b], i) => (
+              <button
+                key={i}
+                onClick={() => probarEjemplo(a, b)}
+                className="px-3 py-2 text-xs bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+                disabled={cargando}
+              >
+                {a} & {b}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Inputs */}
@@ -201,32 +185,31 @@ export default function Calculadora() {
               type="number"
               value={valA}
               onChange={(e) => setValA(e.target.value)}
-              onKeyPress={manejarKeyPress}
+              onKeyDown={manejarEnter}
               className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="Primer número"
+              placeholder="Ingresa un número"
               disabled={cargando}
             />
           </div>
-          
           <div>
             <label className="block text-gray-300 mb-2 text-sm">Número B</label>
             <input
               type="number"
               value={valB}
               onChange={(e) => setValB(e.target.value)}
-              onKeyPress={manejarKeyPress}
+              onKeyDown={manejarEnter}
               className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="Segundo número"
+              placeholder="Ingresa otro número"
               disabled={cargando}
             />
           </div>
         </div>
 
-        {/* Botón */}
+        {/* Botón calcular */}
         <button
           onClick={calcular}
           disabled={!modeloActual || !valA || !valB || cargando}
-          className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 rounded-xl transition-all"
+          className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 rounded-xl transition-all disabled:cursor-not-allowed"
         >
           {cargando ? (
             <div className="flex items-center justify-center">
@@ -234,7 +217,7 @@ export default function Calculadora() {
               Calculando...
             </div>
           ) : (
-            `Calcular ${operacion === 'suma' ? 'Suma' : 'Resta'}`
+            `Calcular ${operacion}`
           )}
         </button>
 
